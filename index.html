@@ -347,7 +347,7 @@
     </div>
 
     <script>
-        let allMarkets = [];
+        var allMarkets = [];
 
         function formatPrice(price) {
             if (price >= 1000) return price.toFixed(2);
@@ -362,63 +362,59 @@
             return volume.toFixed(2);
         }
 
-        async function fetchMarkets() {
-            const btn = document.getElementById('refreshBtn');
-            const icon = document.getElementById('refreshIcon');
-            const errorContainer = document.getElementById('errorContainer');
+        function fetchMarkets() {
+            var btn = document.getElementById('refreshBtn');
+            var icon = document.getElementById('refreshIcon');
+            var errorContainer = document.getElementById('errorContainer');
             
             btn.disabled = true;
             icon.style.display = 'inline-block';
             icon.style.animation = 'spin 1s linear infinite';
             errorContainer.innerHTML = '';
 
-            try {
-                const [paradexResponse, extendedResponse] = await Promise.all([
-                    fetch('https://api.prod.paradex.trade/v1/markets'),
-                    fetch('https://api.starknet.extended.exchange/api/v1/info/markets')
-                ]);
-
-                const paradexData = await paradexResponse.json();
-                const extendedData = await extendedResponse.json();
+            Promise.all([
+                fetch('https://api.prod.paradex.trade/v1/markets'),
+                fetch('https://api.starknet.extended.exchange/api/v1/info/markets')
+            ]).then(function(responses) {
+                return Promise.all([responses[0].json(), responses[1].json()]);
+            }).then(function(data) {
+                var paradexData = data[0];
+                var extendedData = data[1];
 
                 if (paradexData.results && extendedData.data) {
                     allMarkets = processMarkets(paradexData.results, extendedData.data);
                     renderMarkets();
                     
-                    const now = new Date();
+                    var now = new Date();
                     document.getElementById('lastUpdate').textContent = 
-                        `Dernière mise à jour: ${now.toLocaleTimeString('fr-FR')}`;
+                        'Dernière mise à jour: ' + now.toLocaleTimeString('fr-FR');
                 }
-            } catch (err) {
-                errorContainer.innerHTML = `
-                    <div class="error">
-                        ⚠️ Erreur lors de la récupération des données: ${err.message}
-                    </div>
-                `;
-            } finally {
+            }).catch(function(err) {
+                errorContainer.innerHTML = '<div class="error">⚠️ Erreur lors de la récupération des données: ' + err.message + '</div>';
+            }).finally(function() {
                 btn.disabled = false;
                 icon.style.animation = '';
-            }
+            });
         }
 
         function processMarkets(paradexMarkets, extendedMarkets) {
-            const combined = [];
+            var combined = [];
 
-            paradexMarkets.forEach(pMarket => {
-                const baseName = pMarket.symbol.replace('-PERP', '').replace('USDC', 'USD');
-                const extMarket = extendedMarkets.find(e => 
-                    e.name === baseName || 
-                    e.name === pMarket.symbol.replace('-PERP', '') ||
-                    e.assetName === baseName.split('-')[0]
-                );
+            paradexMarkets.forEach(function(pMarket) {
+                var baseName = pMarket.symbol.replace('-PERP', '').replace('USDC', 'USD');
+                var extMarket = extendedMarkets.find(function(e) {
+                    return e.name === baseName || 
+                           e.name === pMarket.symbol.replace('-PERP', '') ||
+                           e.assetName === baseName.split('-')[0];
+                });
 
-                if (extMarket && pMarket.market_price && extMarket.marketStats?.lastPrice) {
-                    const paradexPrice = parseFloat(pMarket.market_price);
-                    const extendedPrice = parseFloat(extMarket.marketStats.lastPrice);
+                if (extMarket && pMarket.market_price && extMarket.marketStats && extMarket.marketStats.lastPrice) {
+                    var paradexPrice = parseFloat(pMarket.market_price);
+                    var extendedPrice = parseFloat(extMarket.marketStats.lastPrice);
 
                     if (paradexPrice > 0 && extendedPrice > 0) {
-                        const spread = ((paradexPrice - extendedPrice) / extendedPrice) * 100;
-                        const volume24h = parseFloat(pMarket.volume_24) || 0;
+                        var spread = ((paradexPrice - extendedPrice) / extendedPrice) * 100;
+                        var volume24h = parseFloat(pMarket.volume_24) || 0;
 
                         combined.push({
                             symbol: baseName,
@@ -445,23 +441,26 @@
         }
 
         function renderMarkets() {
-            const sortBy = document.getElementById('sortSelect').value;
-            const minSpread = parseFloat(document.getElementById('minSpread').value) || 0;
-            const tableBody = document.getElementById('tableBody');
+            var sortBy = document.getElementById('sortSelect').value;
+            var minSpread = parseFloat(document.getElementById('minSpread').value) || 0;
+            var tableBody = document.getElementById('tableBody');
 
-            let filtered = allMarkets.filter(m => m.absSpread >= minSpread);
+            var filtered = allMarkets.filter(function(m) {
+                return m.absSpread >= minSpread;
+            });
             
-            filtered.sort((a, b) => {
+            filtered.sort(function(a, b) {
                 if (sortBy === 'spread') return b.absSpread - a.absSpread;
                 if (sortBy === 'symbol') return a.symbol.localeCompare(b.symbol);
                 return 0;
             });
 
-            // Update stats
             document.getElementById('statPairs').textContent = filtered.length;
             
             if (filtered.length > 0) {
-                const avgSpread = filtered.reduce((acc, m) => acc + m.absSpread, 0) / filtered.length;
+                var avgSpread = filtered.reduce(function(acc, m) {
+                    return acc + m.absSpread;
+                }, 0) / filtered.length;
                 document.getElementById('statAvg').textContent = avgSpread.toFixed(2) + '%';
                 document.getElementById('statMax').textContent = filtered[0].absSpread.toFixed(2) + '%';
             } else {
@@ -469,65 +468,42 @@
                 document.getElementById('statMax').textContent = '0.00%';
             }
 
-            // Render table
             if (filtered.length === 0) {
-                tableBody.innerHTML = `
-                    <tr>
-                        <td colspan="6" class="loading">
-                            Aucune opportunité d'arbitrage trouvée
-                        </td>
-                    </tr>
-                `;
+                tableBody.innerHTML = '<tr><td colspan="6" class="loading">Aucune opportunité d\'arbitrage trouvée</td></tr>';
                 return;
             }
 
-            tableBody.innerHTML = filtered.map(market => {
-                const spreadClass = market.absSpread > 1 ? 'high' : market.absSpread > 0.5 ? 'medium' : 'low';
-                const directionClass = market.spread > 0 ? 'buy' : 'sell';
-                const directionText = market.spread > 0 
-                    ? 'Extended → Paradex' 
-                    : 'Paradex → Extended';
+            tableBody.innerHTML = filtered.map(function(market) {
+                var spreadClass = market.absSpread > 1 ? 'high' : market.absSpread > 0.5 ? 'medium' : 'low';
+                var directionClass = market.spread > 0 ? 'buy' : 'sell';
+                var directionText = market.spread > 0 ? 'Extended → Paradex' : 'Paradex → Extended';
+                var arrow = market.spread > 0 ? '↗' : '↘';
 
-                return `
-                    <tr>
-                        <td>
-                            <div class="pair-name">${market.symbol}</div>
-                        </td>
-                        <td class="text-right">
-                            <div class="price-main">$${formatPrice(market.paradex.price)}</div>
-                            <div class="price-details">
-                                Bid: $${formatPrice(market.paradex.bid)} | Ask: $${formatPrice(market.paradex.ask)}
-                            </div>
-                        </td>
-                        <td class="text-center">
-                            <div class="direction ${directionClass}">
-                                ${directionText}
-                            </div>
-                        </td>
-                        <td class="text-right">
-                            <div class="price-main">$${formatPrice(market.extended.price)}</div>
-                            <div class="price-details">
-                                Bid: $${formatPrice(market.extended.bid)} | Ask: $${formatPrice(market.extended.ask)}
-                            </div>
-                        </td>
-                        <td class="text-right">
-                            <div class="spread ${spreadClass}">
-                                ${market.spread > 0 ? '↗' : '↘'} ${market.absSpread.toFixed(2)}%
-                            </div>
-                        </td>
-                        <td class="text-right">
-                            <div>P: $${formatVolume(market.paradex.volume)}</div>
-                            <div class="price-details">E: $${formatVolume(market.extended.volume)}</div>
-                        </td>
-                    </tr>
-                `;
+                return '<tr>' +
+                    '<td><div class="pair-name">' + market.symbol + '</div></td>' +
+                    '<td class="text-right">' +
+                        '<div class="price-main">$' + formatPrice(market.paradex.price) + '</div>' +
+                        '<div class="price-details">Bid: $' + formatPrice(market.paradex.bid) + ' | Ask: $' + formatPrice(market.paradex.ask) + '</div>' +
+                    '</td>' +
+                    '<td class="text-center">' +
+                        '<div class="direction ' + directionClass + '">' + directionText + '</div>' +
+                    '</td>' +
+                    '<td class="text-right">' +
+                        '<div class="price-main">$' + formatPrice(market.extended.price) + '</div>' +
+                        '<div class="price-details">Bid: $' + formatPrice(market.extended.bid) + ' | Ask: $' + formatPrice(market.extended.ask) + '</div>' +
+                    '</td>' +
+                    '<td class="text-right">' +
+                        '<div class="spread ' + spreadClass + '">' + arrow + ' ' + market.absSpread.toFixed(2) + '%</div>' +
+                    '</td>' +
+                    '<td class="text-right">' +
+                        '<div>P: $' + formatVolume(market.paradex.volume) + '</div>' +
+                        '<div class="price-details">E: $' + formatVolume(market.extended.volume) + '</div>' +
+                    '</td>' +
+                '</tr>';
             }).join('');
         }
 
-        // Initial fetch
         fetchMarkets();
-
-        // Auto-refresh every 30 seconds
         setInterval(fetchMarkets, 30000);
     </script>
 </body>
