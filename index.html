@@ -435,14 +435,14 @@
             
             paradexMarkets.forEach(function(pMarket, index) {
                 if (index < 3) {
-                    console.log('Paradex market ' + index + ':', pMarket.market, 'has mark_price:', pMarket.mark_price);
+                    console.log('Paradex market ' + index + ':', pMarket.symbol, 'has mark_price:', pMarket.mark_price);
                 }
                 
-                if (!pMarket.market || !pMarket.mark_price) {
+                if (!pMarket.symbol || !pMarket.mark_price) {
                     return;
                 }
                 
-                var symbol = pMarket.market.replace('-USD-PERP', '');
+                var symbol = pMarket.symbol.replace('-USD-PERP', '');
                 
                 if (index < 3) {
                     console.log('Looking for Extended match for:', symbol);
