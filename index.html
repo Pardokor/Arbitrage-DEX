@@ -391,13 +391,13 @@
 
             try {
                 console.log('Récupération des marchés Paradex avec API key...');
-                var paradexResponse = await fetch('https://api.prod.paradex.trade/v1/bbo', {
+                var paradexResponse = await fetch('https://api.prod.paradex.trade/v1/markets/summary?market=ALL', {
                     headers: {
                         'Authorization': 'Bearer ' + PARADEX_API_KEY
                     }
                 });
                 var paradexData = await paradexResponse.json();
-                console.log('Marchés Paradex récupérés:', paradexData);
+                console.log('Marchés Paradex récupérés:', paradexData.results ? paradexData.results.length : 0);
                 
                 console.log('Récupération des marchés Extended...');
                 var extendedResponse = await fetch('https://corsproxy.io/?' + encodeURIComponent('https://api.starknet.extended.exchange/api/v1/info/markets'));
