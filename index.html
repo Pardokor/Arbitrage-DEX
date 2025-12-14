@@ -39,6 +39,21 @@
             font-size: 1.1rem;
         }
 
+        .status {
+            background: rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+            padding: 8px 15px;
+            border-radius: 8px;
+            display: inline-block;
+            margin-top: 10px;
+            font-size: 0.9rem;
+        }
+
+        .status.connecting {
+            background: rgba(251, 191, 36, 0.2);
+            color: #fbbf24;
+        }
+
         .controls {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
@@ -58,26 +73,6 @@
             gap: 15px;
             flex-wrap: wrap;
             align-items: center;
-        }
-
-        button {
-            background: #7c3aed;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 1rem;
-            transition: background 0.3s;
-        }
-
-        button:hover {
-            background: #6d28d9;
-        }
-
-        button:disabled {
-            background: #4b5563;
-            cursor: not-allowed;
         }
 
         select, input {
@@ -242,16 +237,6 @@
             margin-top: 5px;
         }
 
-        .spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s linear infinite;
-        }
-
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
@@ -277,14 +262,11 @@
         <div class="header">
             <h1>🚀 Arbitrage DEX</h1>
             <p>Paradex vs Extended Exchange</p>
+            <div id="statusIndicator" class="status connecting">Connexion en cours...</div>
         </div>
 
         <div class="controls">
             <div class="controls-left">
-                <button id="refreshBtn" onclick="fetchMarkets()">
-                    <span id="refreshIcon">🔄</span> Actualiser
-                </button>
-                
                 <select id="sortSelect" onchange="renderMarkets()">
                     <option value="spread">Trier par spread</option>
                     <option value="symbol">Trier par symbole</option>
@@ -332,8 +314,7 @@
                 <tbody id="tableBody">
                     <tr>
                         <td colspan="6" class="loading">
-                            <div class="spinner"></div>
-                            <p>Chargement des données...</p>
+                            <p>Connexion aux flux de données...</p>
                         </td>
                     </tr>
                 </tbody>
@@ -341,13 +322,16 @@
         </div>
 
         <div class="footer">
-            <p>Les données sont actualisées toutes les 30 secondes</p>
+            <p>Les données sont mises à jour en temps réel via WebSocket</p>
             <p>⚠️ Ceci est un outil d'information uniquement. Vérifiez toujours les prix avant de trader.</p>
         </div>
     </div>
 
     <script>
-        var allMarkets = [];
+        var allMarkets = {};
+        var paradexData = {};
+        var extendedData = {};
+        var ws = null;
         var corsProxy = 'https://corsproxy.io/?';
 
         function formatPrice(price) {
@@ -363,106 +347,98 @@
             return volume.toFixed(2);
         }
 
-        function fetchMarkets() {
-            var btn = document.getElementById('refreshBtn');
-            var icon = document.getElementById('refreshIcon');
-            var errorContainer = document.getElementById('errorContainer');
-            
-            btn.disabled = true;
-            icon.style.display = 'inline-block';
-            icon.style.animation = 'spin 1s linear infinite';
-            errorContainer.innerHTML = '';
-
-            Promise.all([
-                fetch('https://api.prod.paradex.trade/v1/markets'),
-                fetch(corsProxy + encodeURIComponent('https://api.starknet.extended.exchange/api/v1/info/markets'))
-            ])
-            .then(function(responses) {
-                return Promise.all([responses[0].json(), responses[1].json()]);
-            })
-            .then(function(data) {
-                var paradexData = data[0];
-                var extendedData = data[1];
-
-                console.log('Paradex markets:', paradexData);
-                console.log('Extended markets:', extendedData);
-
-                if (paradexData.results && extendedData.data) {
-                    var pricePromises = paradexData.results
-                        .filter(function(m) { return m.symbol && m.symbol.indexOf('-USD-PERP') > -1; })
-                        .slice(0, 30)
-                        .map(function(pMarket) {
-                            return fetch('https://api.prod.paradex.trade/v1/markets/' + pMarket.symbol + '/summary')
-                                .then(function(r) { 
-                                    if (!r.ok) throw new Error('Not found');
-                                    return r.json(); 
-                                })
-                                .then(function(summary) {
-                                    return {
-                                        market: pMarket,
-                                        summary: summary.result
-                                    };
-                                })
-                                .catch(function() {
-                                    return null;
-                                });
-                        });
-
-                    return Promise.all([Promise.resolve(extendedData.data), Promise.all(pricePromises)]);
-                }
-                return [[], []];
-            })
-            .then(function(results) {
-                var extendedMarkets = results[0];
-                var paradexMarkets = results[1];
-                
-                allMarkets = processMarkets(paradexMarkets, extendedMarkets);
-                renderMarkets();
-                
-                var now = new Date();
-                document.getElementById('lastUpdate').textContent = 
-                    'Dernière mise à jour: ' + now.toLocaleTimeString('fr-FR');
-            })
-            .catch(function(err) {
-                errorContainer.innerHTML = '<div class="error">⚠️ Erreur lors de la récupération des données: ' + err.message + '</div>';
-                console.error('Error:', err);
-            })
-            .finally(function() {
-                btn.disabled = false;
-                icon.style.animation = '';
-            });
+        function updateStatus(message, isConnected) {
+            var status = document.getElementById('statusIndicator');
+            status.textContent = message;
+            status.className = 'status' + (isConnected ? '' : ' connecting');
         }
 
-        function processMarkets(paradexMarkets, extendedMarkets) {
+        function connectParadexWebSocket() {
+            ws = new WebSocket('wss://ws.prod.paradex.trade/v1');
+            
+            ws.onopen = function() {
+                console.log('WebSocket connecté');
+                updateStatus('✓ Connecté - Données en temps réel', true);
+                
+                ws.send(JSON.stringify({
+                    "jsonrpc": "2.0",
+                    "method": "subscribe",
+                    "params": {
+                        "channel": "markets_summary"
+                    },
+                    "id": 1
+                }));
+            };
+            
+            ws.onmessage = function(event) {
+                var data = JSON.parse(event.data);
+                
+                if (data.method === 'subscription' && data.params && data.params.channel === 'markets_summary') {
+                    var markets = data.params.data;
+                    markets.forEach(function(market) {
+                        if (market.market && market.mark_price) {
+                            paradexData[market.market] = market;
+                        }
+                    });
+                    processAndRenderMarkets();
+                }
+            };
+            
+            ws.onerror = function(error) {
+                console.error('Erreur WebSocket:', error);
+                updateStatus('✗ Erreur de connexion', false);
+            };
+            
+            ws.onclose = function() {
+                console.log('WebSocket déconnecté');
+                updateStatus('Reconnexion...', false);
+                setTimeout(connectParadexWebSocket, 5000);
+            };
+        }
+
+        function fetchExtendedMarkets() {
+            fetch(corsProxy + encodeURIComponent('https://api.starknet.extended.exchange/api/v1/info/markets'))
+                .then(function(response) {
+                    return response.json();
+                })
+                .then(function(data) {
+                    if (data.data) {
+                        data.data.forEach(function(market) {
+                            if (market.active && market.marketStats && market.marketStats.lastPrice) {
+                                extendedData[market.name] = market;
+                            }
+                        });
+                        console.log('Extended markets loaded:', Object.keys(extendedData).length);
+                        processAndRenderMarkets();
+                    }
+                })
+                .catch(function(err) {
+                    console.error('Erreur Extended:', err);
+                    document.getElementById('errorContainer').innerHTML = 
+                        '<div class="error">⚠️ Erreur lors de la récupération des données Extended: ' + err.message + '</div>';
+                });
+        }
+
+        function processAndRenderMarkets() {
             var combined = [];
             
-            console.log('Processing markets...');
-            console.log('Paradex with prices:', paradexMarkets.filter(function(p) { return p; }).length);
-            console.log('Extended markets:', extendedMarkets.length);
-
-            paradexMarkets.forEach(function(pData) {
-                if (!pData || !pData.market || !pData.summary) return;
+            for (var marketSymbol in paradexData) {
+                var pMarket = paradexData[marketSymbol];
+                var symbol = marketSymbol.replace('-USD-PERP', '');
                 
-                var pMarket = pData.market;
-                var summary = pData.summary;
-                var symbol = pMarket.symbol.replace('-USD-PERP', '');
+                var extMarket = extendedData[symbol + '-USD'];
                 
-                var extMarket = extendedMarkets.find(function(e) {
-                    if (!e.assetName) return false;
-                    var eName = e.assetName;
-                    
-                    if (symbol === 'kPEPE') return eName === '1000PEPE' || eName === 'PEPE';
-                    if (symbol === 'kSHIB') return eName === '1000SHIB' || eName === 'SHIB';
-                    if (symbol === 'kBONK') return eName === '1000BONK' || eName === 'BONK';
-                    if (symbol === 'kFLOKI') return eName === '1000FLOKI' || eName === 'FLOKI';
-                    
-                    return eName === symbol;
-                });
-
-                if (extMarket && extMarket.marketStats && extMarket.marketStats.lastPrice && summary.mark_price) {
-                    var paradexPrice = parseFloat(summary.mark_price);
+                if (!extMarket) {
+                    if (symbol === 'kPEPE') extMarket = extendedData['1000PEPE-USD'];
+                    else if (symbol === 'kSHIB') extMarket = extendedData['1000SHIB-USD'];
+                    else if (symbol === 'kBONK') extMarket = extendedData['1000BONK-USD'];
+                    else if (symbol === 'kFLOKI') extMarket = extendedData['1000FLOKI-USD'];
+                }
+                
+                if (extMarket && pMarket.mark_price) {
+                    var paradexPrice = parseFloat(pMarket.mark_price);
                     var extendedPrice = parseFloat(extMarket.marketStats.lastPrice);
-
+                    
                     if (paradexPrice > 0 && extendedPrice > 0) {
                         var spread = ((paradexPrice - extendedPrice) / extendedPrice) * 100;
                         
@@ -470,9 +446,9 @@
                             symbol: extMarket.name,
                             paradex: {
                                 price: paradexPrice,
-                                volume: parseFloat(summary.volume_24 || 0),
-                                bid: parseFloat(summary.best_bid || paradexPrice),
-                                ask: parseFloat(summary.best_ask || paradexPrice)
+                                volume: parseFloat(pMarket.volume_24 || 0),
+                                bid: parseFloat(pMarket.best_bid || paradexPrice),
+                                ask: parseFloat(pMarket.best_ask || paradexPrice)
                             },
                             extended: {
                                 price: extendedPrice,
@@ -483,14 +459,16 @@
                             spread: spread,
                             absSpread: Math.abs(spread)
                         });
-                        
-                        console.log('✓ Matched:', symbol, '→', extMarket.name, 'P:', paradexPrice, 'E:', extendedPrice, 'Spread:', spread.toFixed(2) + '%');
                     }
                 }
-            });
+            }
             
-            console.log('Total matched markets:', combined.length);
-            return combined;
+            allMarkets = combined;
+            renderMarkets();
+            
+            var now = new Date();
+            document.getElementById('lastUpdate').textContent = 
+                'Dernière mise à jour: ' + now.toLocaleTimeString('fr-FR');
         }
 
         function renderMarkets() {
@@ -556,8 +534,9 @@
             }).join('');
         }
 
-        fetchMarkets();
-        setInterval(fetchMarkets, 30000);
+        connectParadexWebSocket();
+        fetchExtendedMarkets();
+        setInterval(fetchExtendedMarkets, 60000);
     </script>
 </body>
 </html>
