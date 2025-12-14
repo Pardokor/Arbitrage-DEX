@@ -288,12 +288,7 @@
             <p>Paradex vs Extended Exchange</p>
         </div>
 
-        <div class="warning">
-            ⚠️ <strong>Note importante:</strong> L'API Paradex nécessite une authentification pour accéder aux prix en temps réel. 
-            Cette version utilise un proxy CORS pour contourner les restrictions. Si les données ne se chargent pas, 
-            l'API Paradex bloque probablement l'accès depuis le navigateur. 
-            Pour un accès complet, vous devrez créer une application backend avec des clés API Paradex.
-        </div>
+
 
         <div class="controls">
             <div class="controls-left">
@@ -366,7 +361,6 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/ccxt@4.2.25/dist/ccxt.browser.js"></script>
     <script>
         var allMarkets = [];
 
@@ -383,6 +377,8 @@
             return volume.toFixed(2);
         }
 
+        var PARADEX_API_KEY = 'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXAiOiJhdCtKV1QiLCJ0b2tlbl91c2FnZSI6InJlYWRvbmx5IiwicHVia2V5IjoiMHg1Yjc0M2EwZGJiYWJmN2QyNmI1MzVhMWEzNmI5MmYwNDg0OTljYzYzNDBmMjdlYmIxM2RkZDc3OGY5MDUwYjAiLCJpc3MiOiJQYXJhZGV4IHByb2QiLCJzdWIiOiIweDNlYTkwOTE0MjU3OTdkZjk1YjhjY2NiZDM3MTE2YTZjMWQzOWU0YzY1MWUxNTNkM2FkNjZiODU4NmI2ODM2OSIsImV4cCI6MTc5NzI4OTE1NywibmJmIjoxNzY1NzUzMTU3LCJpYXQiOjE3NjU3NTMxNTcsImp0aSI6IjJkZmIyYzBhLWMzZDgtNDI5Ni05MzVkLWU3NDNiYjcwMjJkMCJ9.-Ibu1MnUOVzzyCivyZu48ab86xxCid1POnuxUBYWnOpTlVuEs8CFMlabwX88pQ8GX-Z8abJ-c0CCladKRcXTfg';
+
         async function fetchMarkets() {
             var btn = document.getElementById('refreshBtn');
             var icon = document.getElementById('refreshIcon');
@@ -394,20 +390,22 @@
             errorContainer.innerHTML = '';
 
             try {
-                console.log('Initialisation CCXT Paradex...');
-                var paradex = new ccxt.paradex();
-                
-                console.log('Récupération des marchés Paradex...');
-                var paradexMarkets = await paradex.fetchTickers();
-                console.log('Marchés Paradex récupérés:', Object.keys(paradexMarkets).length);
+                console.log('Récupération des marchés Paradex avec API key...');
+                var paradexResponse = await fetch('https://api.prod.paradex.trade/v1/bbo', {
+                    headers: {
+                        'Authorization': 'Bearer ' + PARADEX_API_KEY
+                    }
+                });
+                var paradexData = await paradexResponse.json();
+                console.log('Marchés Paradex récupérés:', paradexData);
                 
                 console.log('Récupération des marchés Extended...');
                 var extendedResponse = await fetch('https://corsproxy.io/?' + encodeURIComponent('https://api.starknet.extended.exchange/api/v1/info/markets'));
                 var extendedData = await extendedResponse.json();
                 console.log('Marchés Extended récupérés:', extendedData.data.length);
                 
-                if (paradexMarkets && extendedData.data) {
-                    allMarkets = processMarkets(paradexMarkets, extendedData.data);
+                if (paradexData.results && extendedData.data) {
+                    allMarkets = processMarkets(paradexData.results, extendedData.data);
                     renderMarkets();
                     
                     var now = new Date();
@@ -429,28 +427,27 @@
             var combined = [];
             
             console.log('Traitement des marchés...');
+            console.log('Paradex markets count:', paradexMarkets.length);
             
-            for (var symbol in paradexMarkets) {
-                var ticker = paradexMarkets[symbol];
+            paradexMarkets.forEach(function(pMarket) {
+                if (!pMarket.market || !pMarket.mark_price) return;
                 
-                if (!symbol.includes('/USD:USD')) continue;
-                
-                var baseAsset = symbol.split('/')[0];
+                var symbol = pMarket.market.replace('-USD-PERP', '');
                 
                 var extMarket = extendedMarkets.find(function(e) {
                     if (!e.assetName) return false;
                     var eName = e.assetName;
                     
-                    if (baseAsset === 'kPEPE') return eName === '1000PEPE' || eName === 'PEPE';
-                    if (baseAsset === 'kSHIB') return eName === '1000SHIB' || eName === 'SHIB';
-                    if (baseAsset === 'kBONK') return eName === '1000BONK' || eName === 'BONK';
-                    if (baseAsset === 'kFLOKI') return eName === '1000FLOKI' || eName === 'FLOKI';
+                    if (symbol === 'kPEPE') return eName === '1000PEPE' || eName === 'PEPE';
+                    if (symbol === 'kSHIB') return eName === '1000SHIB' || eName === 'SHIB';
+                    if (symbol === 'kBONK') return eName === '1000BONK' || eName === 'BONK';
+                    if (symbol === 'kFLOKI') return eName === '1000FLOKI' || eName === 'FLOKI';
                     
-                    return eName === baseAsset;
+                    return eName === symbol;
                 });
                 
-                if (extMarket && extMarket.marketStats && extMarket.marketStats.lastPrice && ticker.last) {
-                    var paradexPrice = parseFloat(ticker.last);
+                if (extMarket && extMarket.marketStats && extMarket.marketStats.lastPrice) {
+                    var paradexPrice = parseFloat(pMarket.mark_price);
                     var extendedPrice = parseFloat(extMarket.marketStats.lastPrice);
                     
                     if (paradexPrice > 0 && extendedPrice > 0) {
@@ -460,9 +457,9 @@
                             symbol: extMarket.name,
                             paradex: {
                                 price: paradexPrice,
-                                volume: ticker.quoteVolume || 0,
-                                bid: ticker.bid || paradexPrice,
-                                ask: ticker.ask || paradexPrice
+                                volume: parseFloat(pMarket.volume_24 || 0),
+                                bid: parseFloat(pMarket.best_bid || paradexPrice),
+                                ask: parseFloat(pMarket.best_ask || paradexPrice)
                             },
                             extended: {
                                 price: extendedPrice,
@@ -474,10 +471,10 @@
                             absSpread: Math.abs(spread)
                         });
                         
-                        console.log('✓ Matched:', baseAsset, '→', extMarket.name, 'Spread:', spread.toFixed(2) + '%');
+                        console.log('✓ Matched:', symbol, '→', extMarket.name, 'Spread:', spread.toFixed(2) + '%');
                     }
                 }
-            }
+            });
             
             console.log('Total matched markets:', combined.length);
             return combined;
