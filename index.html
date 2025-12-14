@@ -333,9 +333,9 @@
                 <thead>
                     <tr>
                         <th>Paire</th>
-                        <th class="text-right">Paradex (Mark Price)</th>
+                        <th class="text-right">Paradex (Mid Price)</th>
                         <th class="text-center">Direction</th>
-                        <th class="text-right">Extended</th>
+                        <th class="text-right">Extended (Mid Price)</th>
                         <th class="text-right">Spread</th>
                         <th class="text-right">Volume 24h</th>
                     </tr>
@@ -468,11 +468,16 @@
                 }
                 
                 if (extMarket && extMarket.marketStats && extMarket.marketStats.lastPrice) {
-                    var paradexPrice = parseFloat(pMarket.mark_price);
-                    var extendedPrice = parseFloat(extMarket.marketStats.lastPrice);
+                    var paradexBid = parseFloat(pMarket.bid);
+                    var paradexAsk = parseFloat(pMarket.ask);
+                    var paradexMid = (paradexBid + paradexAsk) / 2;
                     
-                    if (paradexPrice > 0 && extendedPrice > 0) {
-                        var spread = ((paradexPrice - extendedPrice) / extendedPrice) * 100;
+                    var extendedBid = parseFloat(extMarket.marketStats.bidPrice);
+                    var extendedAsk = parseFloat(extMarket.marketStats.askPrice);
+                    var extendedMid = (extendedBid + extendedAsk) / 2;
+                    
+                    if (paradexMid > 0 && extendedMid > 0) {
+                        var spread = ((paradexMid - extendedMid) / extendedMid) * 100;
                         
                         combined.push({
                             symbol: extMarket.name,
