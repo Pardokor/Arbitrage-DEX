@@ -375,7 +375,7 @@
             var corsProxy = 'https://corsproxy.io/?';
             
             Promise.all([
-                fetch(corsProxy + encodeURIComponent('https://api.prod.paradex.trade/v1/markets')),
+                fetch(corsProxy + encodeURIComponent('https://api.prod.paradex.trade/v1/markets/summary')),
                 fetch(corsProxy + encodeURIComponent('https://api.starknet.extended.exchange/api/v1/info/markets'))
             ]).then(function(responses) {
                 return Promise.all([responses[0].json(), responses[1].json()]);
@@ -408,61 +408,47 @@
             console.log('Sample Extended market:', extendedMarkets[0]);
 
             paradexMarkets.forEach(function(pMarket) {
-                if (!pMarket.symbol) return;
+                if (!pMarket.market || !pMarket.mark_price) return;
                 
-                var baseName = pMarket.symbol.replace('-PERP', '');
-                var baseAsset = baseName.split('-')[0];
+                var symbol = pMarket.market;
+                var baseName = symbol.replace('-USD-PERP', '');
                 
                 var extMarket = extendedMarkets.find(function(e) {
                     if (!e.name && !e.assetName) return false;
-                    var eName = e.name || (e.assetName + '-USD');
-                    return eName === baseName || 
-                           eName === baseName + '-USD' ||
-                           eName === baseAsset + '-USD' ||
-                           e.assetName === baseAsset;
+                    return e.name === (baseName + '-USD') || 
+                           e.assetName === baseName;
                 });
 
-                if (extMarket) {
-                    var pPrice = pMarket.mark_price || pMarket.market_price || pMarket.oracle_price;
-                    var ePrice = null;
-                    
-                    if (extMarket.marketStats) {
-                        ePrice = extMarket.marketStats.lastPrice || 
-                                extMarket.marketStats.markPrice || 
-                                extMarket.marketStats.indexPrice;
-                    }
-                    
-                    if (pPrice && ePrice) {
-                        var paradexPrice = parseFloat(pPrice);
-                        var extendedPrice = parseFloat(ePrice);
+                if (extMarket && extMarket.marketStats && extMarket.marketStats.lastPrice) {
+                    var paradexPrice = parseFloat(pMarket.mark_price);
+                    var extendedPrice = parseFloat(extMarket.marketStats.lastPrice);
 
-                        if (paradexPrice > 0 && extendedPrice > 0) {
-                            var spread = ((paradexPrice - extendedPrice) / extendedPrice) * 100;
-                            var volume24h = parseFloat(pMarket.volume_24 || pMarket.volume || 0);
+                    if (paradexPrice > 0 && extendedPrice > 0) {
+                        var spread = ((paradexPrice - extendedPrice) / extendedPrice) * 100;
+                        var volume24h = parseFloat(pMarket.volume || 0);
 
-                            combined.push({
-                                symbol: baseName,
-                                paradex: {
-                                    price: paradexPrice,
-                                    volume: volume24h,
-                                    bid: parseFloat(pMarket.best_bid || pMarket.bid || paradexPrice),
-                                    ask: parseFloat(pMarket.best_ask || pMarket.ask || paradexPrice)
-                                },
-                                extended: {
-                                    price: extendedPrice,
-                                    volume: parseFloat((extMarket.marketStats && extMarket.marketStats.dailyVolume) || 0),
-                                    bid: parseFloat((extMarket.marketStats && extMarket.marketStats.bidPrice) || extendedPrice),
-                                    ask: parseFloat((extMarket.marketStats && extMarket.marketStats.askPrice) || extendedPrice)
-                                },
-                                spread: spread,
-                                absSpread: Math.abs(spread)
-                            });
-                            
-                            console.log('Matched:', baseName, 'Paradex:', paradexPrice, 'Extended:', extendedPrice, 'Spread:', spread.toFixed(2) + '%');
-                        }
+                        combined.push({
+                            symbol: baseName + '-USD',
+                            paradex: {
+                                price: paradexPrice,
+                                volume: volume24h,
+                                bid: parseFloat(pMarket.best_bid || paradexPrice),
+                                ask: parseFloat(pMarket.best_ask || paradexPrice)
+                            },
+                            extended: {
+                                price: extendedPrice,
+                                volume: parseFloat(extMarket.marketStats.dailyVolume || 0),
+                                bid: parseFloat(extMarket.marketStats.bidPrice || extendedPrice),
+                                ask: parseFloat(extMarket.marketStats.askPrice || extendedPrice)
+                            },
+                            spread: spread,
+                            absSpread: Math.abs(spread)
+                        });
+                        
+                        console.log('Matched:', baseName, 'Paradex:', paradexPrice, 'Extended:', extendedPrice, 'Spread:', spread.toFixed(2) + '%');
                     }
                 } else {
-                    console.log('No match for:', pMarket.symbol);
+                    console.log('No match for:', symbol);
                 }
             });
             
