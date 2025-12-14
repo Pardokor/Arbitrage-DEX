@@ -1,288 +1,510 @@
-import React, { useState, useEffect } from 'react';
-import { RefreshCw, TrendingUp, TrendingDown, ArrowRight, AlertCircle } from 'lucide-react';
-
-const App = () => {
-  const [markets, setMarkets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const [sortBy, setSortBy] = useState('spread');
-  const [minSpread, setMinSpread] = useState(0);
-
-  const fetchMarkets = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      // Fetch Paradex markets
-      const paradexResponse = await fetch('https://api.prod.paradex.trade/v1/markets');
-      const paradexData = await paradexResponse.json();
-      
-      // Fetch Extended markets
-      const extendedResponse = await fetch('https://api.starknet.extended.exchange/api/v1/info/markets');
-      const extendedData = await extendedResponse.json();
-      
-      if (paradexData.results && extendedData.data) {
-        const combinedMarkets = processMarkets(paradexData.results, extendedData.data);
-        setMarkets(combinedMarkets);
-        setLastUpdate(new Date());
-      }
-    } catch (err) {
-      setError('Erreur lors de la récupération des données: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const processMarkets = (paradexMarkets, extendedMarkets) => {
-    const combined = [];
-    
-    paradexMarkets.forEach(pMarket => {
-      const baseName = pMarket.symbol.replace('-PERP', '').replace('USDC', 'USD');
-      const extMarket = extendedMarkets.find(e => 
-        e.name === baseName || 
-        e.name === pMarket.symbol.replace('-PERP', '') ||
-        e.assetName === baseName.split('-')[0]
-      );
-      
-      if (extMarket && pMarket.market_price && extMarket.marketStats?.lastPrice) {
-        const paradexPrice = parseFloat(pMarket.market_price);
-        const extendedPrice = parseFloat(extMarket.marketStats.lastPrice);
-        
-        if (paradexPrice > 0 && extendedPrice > 0) {
-          const spread = ((paradexPrice - extendedPrice) / extendedPrice) * 100;
-          const volume24h = parseFloat(pMarket.volume_24) || 0;
-          
-          combined.push({
-            symbol: baseName,
-            paradex: {
-              price: paradexPrice,
-              volume: volume24h,
-              bid: parseFloat(pMarket.best_bid) || paradexPrice,
-              ask: parseFloat(pMarket.best_ask) || paradexPrice
-            },
-            extended: {
-              price: extendedPrice,
-              volume: parseFloat(extMarket.marketStats.dailyVolume || 0),
-              bid: parseFloat(extMarket.marketStats.bidPrice || extendedPrice),
-              ask: parseFloat(extMarket.marketStats.askPrice || extendedPrice)
-            },
-            spread: spread,
-            absSpread: Math.abs(spread),
-            direction: spread > 0 ? 'extended-to-paradex' : 'paradex-to-extended'
-          });
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arbitrage DEX - Paradex vs Extended</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-      }
-    });
-    
-    return combined;
-  };
 
-  useEffect(() => {
-    fetchMarkets();
-    const interval = setInterval(fetchMarkets, 30000);
-    return () => clearInterval(interval);
-  }, []);
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e293b 0%, #581c87 50%, #1e293b 100%);
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+        }
 
-  const sortedMarkets = [...markets]
-    .filter(m => m.absSpread >= minSpread)
-    .sort((a, b) => {
-      if (sortBy === 'spread') return b.absSpread - a.absSpread;
-      if (sortBy === 'symbol') return a.symbol.localeCompare(b.symbol);
-      return 0;
-    });
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
 
-  const formatPrice = (price) => {
-    if (price >= 1000) return price.toFixed(2);
-    if (price >= 1) return price.toFixed(4);
-    return price.toFixed(6);
-  };
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
 
-  const formatVolume = (volume) => {
-    if (volume >= 1e9) return (volume / 1e9).toFixed(2) + 'B';
-    if (volume >= 1e6) return (volume / 1e6).toFixed(2) + 'M';
-    if (volume >= 1e3) return (volume / 1e3).toFixed(2) + 'K';
-    return volume.toFixed(2);
-  };
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-      <div className="container mx-auto px-4 py-8 max-w-7xl">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2 flex items-center justify-center gap-3">
-            <TrendingUp className="text-green-400" size={36} />
-            Arbitrage DEX
-          </h1>
-          <p className="text-purple-200">Paradex vs Extended Exchange</p>
+        .header p {
+            color: #d8b4fe;
+            font-size: 1.1rem;
+        }
+
+        .controls {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .controls-left {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        button {
+            background: #7c3aed;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #6d28d9;
+        }
+
+        button:disabled {
+            background: #4b5563;
+            cursor: not-allowed;
+        }
+
+        select, input {
+            background: #1e293b;
+            color: white;
+            border: 1px solid #475569;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .filter-group input {
+            width: 80px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .stat-label {
+            color: #d8b4fe;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+        }
+
+        .table-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            color: #d8b4fe;
+            font-weight: 600;
+        }
+
+        th.text-right, td.text-right {
+            text-align: right;
+        }
+
+        th.text-center, td.text-center {
+            text-align: center;
+        }
+
+        td {
+            padding: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        tbody tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .pair-name {
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        .price-main {
+            font-weight: 600;
+            margin-bottom: 3px;
+        }
+
+        .price-details {
+            font-size: 0.85rem;
+            color: #d8b4fe;
+        }
+
+        .direction {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 10px;
+            border-radius: 8px;
+        }
+
+        .direction.buy {
+            background: rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+        }
+
+        .direction.sell {
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+        }
+
+        .spread {
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        .spread.high {
+            color: #4ade80;
+        }
+
+        .spread.medium {
+            color: #fbbf24;
+        }
+
+        .spread.low {
+            color: #9ca3af;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #d8b4fe;
+        }
+
+        .error {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid #ef4444;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            color: #fca5a5;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            color: #d8b4fe;
+            font-size: 0.9rem;
+        }
+
+        .footer p {
+            margin-top: 5px;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .controls-left {
+                flex-direction: column;
+            }
+
+            .table-container {
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Arbitrage DEX</h1>
+            <p>Paradex vs Extended Exchange</p>
         </div>
 
-        {/* Controls */}
-        <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 mb-6 shadow-2xl border border-white/20">
-          <div className="flex flex-wrap gap-4 items-center justify-between">
-            <div className="flex gap-4 items-center">
-              <button
-                onClick={fetchMarkets}
-                disabled={loading}
-                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg transition-all"
-              >
-                <RefreshCw className={loading ? 'animate-spin' : ''} size={18} />
-                Actualiser
-              </button>
-              
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="bg-slate-800 text-white px-4 py-2 rounded-lg border border-slate-600"
-              >
-                <option value="spread">Trier par spread</option>
-                <option value="symbol">Trier par symbole</option>
-              </select>
+        <div class="controls">
+            <div class="controls-left">
+                <button id="refreshBtn" onclick="fetchMarkets()">
+                    <span id="refreshIcon">🔄</span> Actualiser
+                </button>
+                
+                <select id="sortSelect" onchange="renderMarkets()">
+                    <option value="spread">Trier par spread</option>
+                    <option value="symbol">Trier par symbole</option>
+                </select>
 
-              <div className="flex items-center gap-2">
-                <label className="text-white text-sm">Spread min:</label>
-                <input
-                  type="number"
-                  value={minSpread}
-                  onChange={(e) => setMinSpread(parseFloat(e.target.value) || 0)}
-                  step="0.1"
-                  className="bg-slate-800 text-white px-3 py-2 rounded-lg w-24 border border-slate-600"
-                />
-                <span className="text-white">%</span>
-              </div>
+                <div class="filter-group">
+                    <label>Spread min:</label>
+                    <input type="number" id="minSpread" value="0" step="0.1" onchange="renderMarkets()">
+                    <span>%</span>
+                </div>
             </div>
 
-            {lastUpdate && (
-              <div className="text-purple-200 text-sm">
-                Dernière mise à jour: {lastUpdate.toLocaleTimeString('fr-FR')}
-              </div>
-            )}
-          </div>
+            <div id="lastUpdate"></div>
         </div>
 
-        {error && (
-          <div className="bg-red-500/20 border border-red-500 rounded-lg p-4 mb-6 flex items-center gap-3">
-            <AlertCircle className="text-red-400" size={24} />
-            <p className="text-red-200">{error}</p>
-          </div>
-        )}
+        <div id="errorContainer"></div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
-            <div className="text-purple-200 text-sm mb-1">Paires disponibles</div>
-            <div className="text-3xl font-bold text-white">{sortedMarkets.length}</div>
-          </div>
-          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
-            <div className="text-purple-200 text-sm mb-1">Spread moyen</div>
-            <div className="text-3xl font-bold text-white">
-              {sortedMarkets.length > 0
-                ? (sortedMarkets.reduce((acc, m) => acc + m.absSpread, 0) / sortedMarkets.length).toFixed(2)
-                : '0.00'}%
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-label">Paires disponibles</div>
+                <div class="stat-value" id="statPairs">0</div>
             </div>
-          </div>
-          <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
-            <div className="text-purple-200 text-sm mb-1">Spread max</div>
-            <div className="text-3xl font-bold text-white">
-              {sortedMarkets.length > 0
-                ? sortedMarkets[0].absSpread.toFixed(2)
-                : '0.00'}%
+            <div class="stat-card">
+                <div class="stat-label">Spread moyen</div>
+                <div class="stat-value" id="statAvg">0.00%</div>
             </div>
-          </div>
+            <div class="stat-card">
+                <div class="stat-label">Spread max</div>
+                <div class="stat-value" id="statMax">0.00%</div>
+            </div>
         </div>
 
-        {/* Markets Table */}
-        <div className="bg-white/10 backdrop-blur-lg rounded-xl overflow-hidden shadow-2xl border border-white/20">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-black/30">
-                <tr>
-                  <th className="px-6 py-4 text-left text-purple-200 font-semibold">Paire</th>
-                  <th className="px-6 py-4 text-right text-purple-200 font-semibold">Paradex</th>
-                  <th className="px-6 py-4 text-center text-purple-200 font-semibold">Direction</th>
-                  <th className="px-6 py-4 text-right text-purple-200 font-semibold">Extended</th>
-                  <th className="px-6 py-4 text-right text-purple-200 font-semibold">Spread</th>
-                  <th className="px-6 py-4 text-right text-purple-200 font-semibold">Volume 24h</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/10">
-                {loading && sortedMarkets.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" className="px-6 py-12 text-center text-purple-200">
-                      <RefreshCw className="animate-spin mx-auto mb-2" size={32} />
-                      Chargement des données...
-                    </td>
-                  </tr>
-                ) : sortedMarkets.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" className="px-6 py-12 text-center text-purple-200">
-                      Aucune opportunité d'arbitrage trouvée
-                    </td>
-                  </tr>
-                ) : (
-                  sortedMarkets.map((market, idx) => (
-                    <tr key={idx} className="hover:bg-white/5 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="font-bold text-white text-lg">{market.symbol}</div>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="text-white font-semibold">${formatPrice(market.paradex.price)}</div>
-                        <div className="text-xs text-purple-300">
-                          Bid: ${formatPrice(market.paradex.bid)} | Ask: ${formatPrice(market.paradex.ask)}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <div className="flex items-center justify-center">
-                          {market.spread > 0 ? (
-                            <div className="flex items-center gap-2 text-green-400">
-                              <span className="text-sm">Extended</span>
-                              <ArrowRight size={20} />
-                              <span className="text-sm">Paradex</span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2 text-blue-400">
-                              <span className="text-sm">Paradex</span>
-                              <ArrowRight size={20} />
-                              <span className="text-sm">Extended</span>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="text-white font-semibold">${formatPrice(market.extended.price)}</div>
-                        <div className="text-xs text-purple-300">
-                          Bid: ${formatPrice(market.extended.bid)} | Ask: ${formatPrice(market.extended.ask)}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className={`text-lg font-bold flex items-center justify-end gap-1 ${
-                          market.absSpread > 1 ? 'text-green-400' : 
-                          market.absSpread > 0.5 ? 'text-yellow-400' : 'text-gray-400'
-                        }`}>
-                          {market.spread > 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
-                          {market.absSpread.toFixed(2)}%
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right text-purple-200">
-                        <div>P: ${formatVolume(market.paradex.volume)}</div>
-                        <div className="text-xs">E: ${formatVolume(market.extended.volume)}</div>
-                      </td>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Paire</th>
+                        <th class="text-right">Paradex</th>
+                        <th class="text-center">Direction</th>
+                        <th class="text-right">Extended</th>
+                        <th class="text-right">Spread</th>
+                        <th class="text-right">Volume 24h</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
+                </thead>
+                <tbody id="tableBody">
+                    <tr>
+                        <td colspan="6" class="loading">
+                            <div class="spinner"></div>
+                            <p>Chargement des données...</p>
+                        </td>
+                    </tr>
+                </tbody>
             </table>
-          </div>
         </div>
 
-        {/* Footer */}
-        <div className="mt-8 text-center text-purple-300 text-sm">
-          <p>Les données sont actualisées toutes les 30 secondes</p>
-          <p className="mt-1">⚠️ Ceci est un outil d'information uniquement. Vérifiez toujours les prix avant de trader.</p>
+        <div class="footer">
+            <p>Les données sont actualisées toutes les 30 secondes</p>
+            <p>⚠️ Ceci est un outil d'information uniquement. Vérifiez toujours les prix avant de trader.</p>
         </div>
-      </div>
     </div>
-  );
-};
 
-export default App;
+    <script>
+        var allMarkets = [];
+
+        function formatPrice(price) {
+            if (price >= 1000) return price.toFixed(2);
+            if (price >= 1) return price.toFixed(4);
+            return price.toFixed(6);
+        }
+
+        function formatVolume(volume) {
+            if (volume >= 1e9) return (volume / 1e9).toFixed(2) + 'B';
+            if (volume >= 1e6) return (volume / 1e6).toFixed(2) + 'M';
+            if (volume >= 1e3) return (volume / 1e3).toFixed(2) + 'K';
+            return volume.toFixed(2);
+        }
+
+        function fetchMarkets() {
+            var btn = document.getElementById('refreshBtn');
+            var icon = document.getElementById('refreshIcon');
+            var errorContainer = document.getElementById('errorContainer');
+            
+            btn.disabled = true;
+            icon.style.display = 'inline-block';
+            icon.style.animation = 'spin 1s linear infinite';
+            errorContainer.innerHTML = '';
+
+            Promise.all([
+                fetch('https://api.prod.paradex.trade/v1/markets'),
+                fetch('https://api.starknet.extended.exchange/api/v1/info/markets')
+            ]).then(function(responses) {
+                return Promise.all([responses[0].json(), responses[1].json()]);
+            }).then(function(data) {
+                var paradexData = data[0];
+                var extendedData = data[1];
+
+                if (paradexData.results && extendedData.data) {
+                    allMarkets = processMarkets(paradexData.results, extendedData.data);
+                    renderMarkets();
+                    
+                    var now = new Date();
+                    document.getElementById('lastUpdate').textContent = 
+                        'Dernière mise à jour: ' + now.toLocaleTimeString('fr-FR');
+                }
+            }).catch(function(err) {
+                errorContainer.innerHTML = '<div class="error">⚠️ Erreur lors de la récupération des données: ' + err.message + '</div>';
+            }).finally(function() {
+                btn.disabled = false;
+                icon.style.animation = '';
+            });
+        }
+
+        function processMarkets(paradexMarkets, extendedMarkets) {
+            var combined = [];
+
+            paradexMarkets.forEach(function(pMarket) {
+                var baseName = pMarket.symbol.replace('-PERP', '').replace('USDC', 'USD');
+                var extMarket = extendedMarkets.find(function(e) {
+                    return e.name === baseName || 
+                           e.name === pMarket.symbol.replace('-PERP', '') ||
+                           e.assetName === baseName.split('-')[0];
+                });
+
+                if (extMarket && pMarket.market_price && extMarket.marketStats && extMarket.marketStats.lastPrice) {
+                    var paradexPrice = parseFloat(pMarket.market_price);
+                    var extendedPrice = parseFloat(extMarket.marketStats.lastPrice);
+
+                    if (paradexPrice > 0 && extendedPrice > 0) {
+                        var spread = ((paradexPrice - extendedPrice) / extendedPrice) * 100;
+                        var volume24h = parseFloat(pMarket.volume_24) || 0;
+
+                        combined.push({
+                            symbol: baseName,
+                            paradex: {
+                                price: paradexPrice,
+                                volume: volume24h,
+                                bid: parseFloat(pMarket.best_bid) || paradexPrice,
+                                ask: parseFloat(pMarket.best_ask) || paradexPrice
+                            },
+                            extended: {
+                                price: extendedPrice,
+                                volume: parseFloat(extMarket.marketStats.dailyVolume || 0),
+                                bid: parseFloat(extMarket.marketStats.bidPrice || extendedPrice),
+                                ask: parseFloat(extMarket.marketStats.askPrice || extendedPrice)
+                            },
+                            spread: spread,
+                            absSpread: Math.abs(spread)
+                        });
+                    }
+                }
+            });
+
+            return combined;
+        }
+
+        function renderMarkets() {
+            var sortBy = document.getElementById('sortSelect').value;
+            var minSpread = parseFloat(document.getElementById('minSpread').value) || 0;
+            var tableBody = document.getElementById('tableBody');
+
+            var filtered = allMarkets.filter(function(m) {
+                return m.absSpread >= minSpread;
+            });
+            
+            filtered.sort(function(a, b) {
+                if (sortBy === 'spread') return b.absSpread - a.absSpread;
+                if (sortBy === 'symbol') return a.symbol.localeCompare(b.symbol);
+                return 0;
+            });
+
+            document.getElementById('statPairs').textContent = filtered.length;
+            
+            if (filtered.length > 0) {
+                var avgSpread = filtered.reduce(function(acc, m) {
+                    return acc + m.absSpread;
+                }, 0) / filtered.length;
+                document.getElementById('statAvg').textContent = avgSpread.toFixed(2) + '%';
+                document.getElementById('statMax').textContent = filtered[0].absSpread.toFixed(2) + '%';
+            } else {
+                document.getElementById('statAvg').textContent = '0.00%';
+                document.getElementById('statMax').textContent = '0.00%';
+            }
+
+            if (filtered.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="6" class="loading">Aucune opportunité d\'arbitrage trouvée</td></tr>';
+                return;
+            }
+
+            tableBody.innerHTML = filtered.map(function(market) {
+                var spreadClass = market.absSpread > 1 ? 'high' : market.absSpread > 0.5 ? 'medium' : 'low';
+                var directionClass = market.spread > 0 ? 'buy' : 'sell';
+                var directionText = market.spread > 0 ? 'Extended → Paradex' : 'Paradex → Extended';
+                var arrow = market.spread > 0 ? '↗' : '↘';
+
+                return '<tr>' +
+                    '<td><div class="pair-name">' + market.symbol + '</div></td>' +
+                    '<td class="text-right">' +
+                        '<div class="price-main">$' + formatPrice(market.paradex.price) + '</div>' +
+                        '<div class="price-details">Bid: $' + formatPrice(market.paradex.bid) + ' | Ask: $' + formatPrice(market.paradex.ask) + '</div>' +
+                    '</td>' +
+                    '<td class="text-center">' +
+                        '<div class="direction ' + directionClass + '">' + directionText + '</div>' +
+                    '</td>' +
+                    '<td class="text-right">' +
+                        '<div class="price-main">$' + formatPrice(market.extended.price) + '</div>' +
+                        '<div class="price-details">Bid: $' + formatPrice(market.extended.bid) + ' | Ask: $' + formatPrice(market.extended.ask) + '</div>' +
+                    '</td>' +
+                    '<td class="text-right">' +
+                        '<div class="spread ' + spreadClass + '">' + arrow + ' ' + market.absSpread.toFixed(2) + '%</div>' +
+                    '</td>' +
+                    '<td class="text-right">' +
+                        '<div>P: $' + formatVolume(market.paradex.volume) + '</div>' +
+                        '<div class="price-details">E: $' + formatVolume(market.extended.volume) + '</div>' +
+                    '</td>' +
+                '</tr>';
+            }).join('');
+        }
+
+        fetchMarkets();
+        setInterval(fetchMarkets, 30000);
+    </script>
+</body>
+</html>
