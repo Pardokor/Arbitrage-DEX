@@ -401,44 +401,70 @@
 
         function processMarkets(paradexMarkets, extendedMarkets) {
             var combined = [];
+            
+            console.log('Paradex markets:', paradexMarkets.length);
+            console.log('Extended markets:', extendedMarkets.length);
 
             paradexMarkets.forEach(function(pMarket) {
-                var baseName = pMarket.symbol.replace('-PERP', '').replace('USDC', 'USD');
+                if (!pMarket.symbol) return;
+                
+                var baseName = pMarket.symbol.replace('-PERP', '');
+                var baseAsset = baseName.split('-')[0];
+                
                 var extMarket = extendedMarkets.find(function(e) {
-                    return e.name === baseName || 
-                           e.name === pMarket.symbol.replace('-PERP', '') ||
-                           e.assetName === baseName.split('-')[0];
+                    if (!e.name && !e.assetName) return false;
+                    var eName = e.name || (e.assetName + '-USD');
+                    return eName === baseName || 
+                           eName === baseName + '-USD' ||
+                           eName === baseAsset + '-USD' ||
+                           e.assetName === baseAsset;
                 });
 
-                if (extMarket && pMarket.market_price && extMarket.marketStats && extMarket.marketStats.lastPrice) {
-                    var paradexPrice = parseFloat(pMarket.market_price);
-                    var extendedPrice = parseFloat(extMarket.marketStats.lastPrice);
-
-                    if (paradexPrice > 0 && extendedPrice > 0) {
-                        var spread = ((paradexPrice - extendedPrice) / extendedPrice) * 100;
-                        var volume24h = parseFloat(pMarket.volume_24) || 0;
-
-                        combined.push({
-                            symbol: baseName,
-                            paradex: {
-                                price: paradexPrice,
-                                volume: volume24h,
-                                bid: parseFloat(pMarket.best_bid) || paradexPrice,
-                                ask: parseFloat(pMarket.best_ask) || paradexPrice
-                            },
-                            extended: {
-                                price: extendedPrice,
-                                volume: parseFloat(extMarket.marketStats.dailyVolume || 0),
-                                bid: parseFloat(extMarket.marketStats.bidPrice || extendedPrice),
-                                ask: parseFloat(extMarket.marketStats.askPrice || extendedPrice)
-                            },
-                            spread: spread,
-                            absSpread: Math.abs(spread)
-                        });
+                if (extMarket) {
+                    var pPrice = pMarket.mark_price || pMarket.market_price || pMarket.oracle_price;
+                    var ePrice = null;
+                    
+                    if (extMarket.marketStats) {
+                        ePrice = extMarket.marketStats.lastPrice || 
+                                extMarket.marketStats.markPrice || 
+                                extMarket.marketStats.indexPrice;
                     }
+                    
+                    if (pPrice && ePrice) {
+                        var paradexPrice = parseFloat(pPrice);
+                        var extendedPrice = parseFloat(ePrice);
+
+                        if (paradexPrice > 0 && extendedPrice > 0) {
+                            var spread = ((paradexPrice - extendedPrice) / extendedPrice) * 100;
+                            var volume24h = parseFloat(pMarket.volume_24 || pMarket.volume || 0);
+
+                            combined.push({
+                                symbol: baseName,
+                                paradex: {
+                                    price: paradexPrice,
+                                    volume: volume24h,
+                                    bid: parseFloat(pMarket.best_bid || pMarket.bid || paradexPrice),
+                                    ask: parseFloat(pMarket.best_ask || pMarket.ask || paradexPrice)
+                                },
+                                extended: {
+                                    price: extendedPrice,
+                                    volume: parseFloat((extMarket.marketStats && extMarket.marketStats.dailyVolume) || 0),
+                                    bid: parseFloat((extMarket.marketStats && extMarket.marketStats.bidPrice) || extendedPrice),
+                                    ask: parseFloat((extMarket.marketStats && extMarket.marketStats.askPrice) || extendedPrice)
+                                },
+                                spread: spread,
+                                absSpread: Math.abs(spread)
+                            });
+                            
+                            console.log('Matched:', baseName, 'Paradex:', paradexPrice, 'Extended:', extendedPrice, 'Spread:', spread.toFixed(2) + '%');
+                        }
+                    }
+                } else {
+                    console.log('No match for:', pMarket.symbol);
                 }
             });
-
+            
+            console.log('Total matched markets:', combined.length);
             return combined;
         }
 
