@@ -373,99 +373,82 @@
             icon.style.animation = 'spin 1s linear infinite';
             errorContainer.innerHTML = '';
 
-            fetch(corsProxy + encodeURIComponent('https://api.starknet.extended.exchange/api/v1/info/markets'))
-                .then(function(response) {
-                    return response.json();
-                })
-                .then(function(extendedData) {
-                    if (extendedData.data) {
-                        var paradexPromises = extendedData.data
-                            .filter(function(market) {
-                                return market.active && market.marketStats && market.marketStats.lastPrice;
-                            })
-                            .slice(0, 50)
-                            .map(function(extMarket) {
-                                var symbol = extMarket.assetName + '-USD-PERP';
-                                return fetch('https://api.prod.paradex.trade/v1/markets?market=' + symbol)
-                                    .then(function(r) { return r.json(); })
-                                    .then(function(pData) {
-                                        if (pData.results && pData.results.length > 0) {
-                                            return fetch('https://api.prod.paradex.trade/v1/bbo?market=' + symbol)
-                                                .then(function(r2) { return r2.json(); })
-                                                .then(function(bboData) {
-                                                    return {
-                                                        paradex: pData.results[0],
-                                                        bbo: bboData.results && bboData.results[0],
-                                                        extended: extMarket
-                                                    };
-                                                })
-                                                .catch(function() {
-                                                    return null;
-                                                });
-                                        }
-                                        return null;
-                                    })
-                                    .catch(function() {
-                                        return null;
-                                    });
-                            });
+            Promise.all([
+                fetch(corsProxy + encodeURIComponent('https://api.prod.paradex.trade/v1/bbo')),
+                fetch(corsProxy + encodeURIComponent('https://api.starknet.extended.exchange/api/v1/info/markets'))
+            ])
+            .then(function(responses) {
+                return Promise.all([responses[0].json(), responses[1].json()]);
+            })
+            .then(function(data) {
+                var paradexData = data[0];
+                var extendedData = data[1];
 
-                        return Promise.all(paradexPromises);
-                    }
-                    return [];
-                })
-                .then(function(marketPairs) {
-                    allMarkets = processMarkets(marketPairs);
+                console.log('Paradex BBO data:', paradexData);
+                console.log('Extended data:', extendedData);
+
+                if (paradexData.results && extendedData.data) {
+                    allMarkets = processMarkets(paradexData.results, extendedData.data);
                     renderMarkets();
                     
                     var now = new Date();
                     document.getElementById('lastUpdate').textContent = 
                         'Dernière mise à jour: ' + now.toLocaleTimeString('fr-FR');
-                })
-                .catch(function(err) {
-                    errorContainer.innerHTML = '<div class="error">⚠️ Erreur lors de la récupération des données: ' + err.message + '</div>';
-                    console.error('Error:', err);
-                })
-                .finally(function() {
-                    btn.disabled = false;
-                    icon.style.animation = '';
-                });
+                }
+            })
+            .catch(function(err) {
+                errorContainer.innerHTML = '<div class="error">⚠️ Erreur lors de la récupération des données: ' + err.message + '</div>';
+                console.error('Error:', err);
+            })
+            .finally(function() {
+                btn.disabled = false;
+                icon.style.animation = '';
+            });
         }
 
-        function processMarkets(marketPairs) {
+        function processMarkets(paradexMarkets, extendedMarkets) {
             var combined = [];
             
-            marketPairs.forEach(function(pair) {
-                if (!pair || !pair.extended || !pair.bbo) return;
+            console.log('Processing markets...');
+            console.log('Paradex markets:', paradexMarkets.length);
+            console.log('Extended markets:', extendedMarkets.length);
+
+            paradexMarkets.forEach(function(pMarket) {
+                if (!pMarket.market) return;
                 
-                var extMarket = pair.extended;
-                var bboData = pair.bbo;
+                var symbol = pMarket.market.replace('-USD-PERP', '');
                 
-                var paradexPrice = parseFloat(bboData.mark_price || bboData.last_price);
-                var extendedPrice = parseFloat(extMarket.marketStats.lastPrice);
-                
-                if (paradexPrice > 0 && extendedPrice > 0) {
-                    var spread = ((paradexPrice - extendedPrice) / extendedPrice) * 100;
-                    
-                    combined.push({
-                        symbol: extMarket.name,
-                        paradex: {
-                            price: paradexPrice,
-                            volume: parseFloat(bboData.volume_24 || 0),
-                            bid: parseFloat(bboData.best_bid || paradexPrice),
-                            ask: parseFloat(bboData.best_ask || paradexPrice)
-                        },
-                        extended: {
-                            price: extendedPrice,
-                            volume: parseFloat(extMarket.marketStats.dailyVolume || 0),
-                            bid: parseFloat(extMarket.marketStats.bidPrice || extendedPrice),
-                            ask: parseFloat(extMarket.marketStats.askPrice || extendedPrice)
-                        },
-                        spread: spread,
-                        absSpread: Math.abs(spread)
-                    });
-                    
-                    console.log('Matched:', extMarket.name, 'Paradex:', paradexPrice, 'Extended:', extendedPrice, 'Spread:', spread.toFixed(2) + '%');
+                var extMarket = extendedMarkets.find(function(e) {
+                    return e.assetName === symbol || e.name === (symbol + '-USD');
+                });
+
+                if (extMarket && extMarket.marketStats && extMarket.marketStats.lastPrice) {
+                    var paradexPrice = parseFloat(pMarket.mark_price || pMarket.last_price);
+                    var extendedPrice = parseFloat(extMarket.marketStats.lastPrice);
+
+                    if (paradexPrice > 0 && extendedPrice > 0) {
+                        var spread = ((paradexPrice - extendedPrice) / extendedPrice) * 100;
+                        
+                        combined.push({
+                            symbol: symbol + '-USD',
+                            paradex: {
+                                price: paradexPrice,
+                                volume: parseFloat(pMarket.volume_24 || 0),
+                                bid: parseFloat(pMarket.best_bid || paradexPrice),
+                                ask: parseFloat(pMarket.best_ask || paradexPrice)
+                            },
+                            extended: {
+                                price: extendedPrice,
+                                volume: parseFloat(extMarket.marketStats.dailyVolume || 0),
+                                bid: parseFloat(extMarket.marketStats.bidPrice || extendedPrice),
+                                ask: parseFloat(extMarket.marketStats.askPrice || extendedPrice)
+                            },
+                            spread: spread,
+                            absSpread: Math.abs(spread)
+                        });
+                        
+                        console.log('✓ Matched:', symbol, 'Spread:', spread.toFixed(2) + '%');
+                    }
                 }
             });
             
