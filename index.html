@@ -372,9 +372,11 @@
             icon.style.animation = 'spin 1s linear infinite';
             errorContainer.innerHTML = '';
 
+            var corsProxy = 'https://corsproxy.io/?';
+            
             Promise.all([
-                fetch('https://api.prod.paradex.trade/v1/markets'),
-                fetch('https://api.starknet.extended.exchange/api/v1/info/markets')
+                fetch(corsProxy + encodeURIComponent('https://api.prod.paradex.trade/v1/markets')),
+                fetch(corsProxy + encodeURIComponent('https://api.starknet.extended.exchange/api/v1/info/markets'))
             ]).then(function(responses) {
                 return Promise.all([responses[0].json(), responses[1].json()]);
             }).then(function(data) {
