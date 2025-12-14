@@ -428,11 +428,25 @@
             
             console.log('Traitement des marchés...');
             console.log('Paradex markets count:', paradexMarkets.length);
+            console.log('Sample Paradex market:', JSON.stringify(paradexMarkets[0]));
+            console.log('Sample Extended market:', JSON.stringify(extendedMarkets[0]));
             
-            paradexMarkets.forEach(function(pMarket) {
-                if (!pMarket.market || !pMarket.mark_price) return;
+            var matchCount = 0;
+            
+            paradexMarkets.forEach(function(pMarket, index) {
+                if (index < 3) {
+                    console.log('Paradex market ' + index + ':', pMarket.market, 'has mark_price:', pMarket.mark_price);
+                }
+                
+                if (!pMarket.market || !pMarket.mark_price) {
+                    return;
+                }
                 
                 var symbol = pMarket.market.replace('-USD-PERP', '');
+                
+                if (index < 3) {
+                    console.log('Looking for Extended match for:', symbol);
+                }
                 
                 var extMarket = extendedMarkets.find(function(e) {
                     if (!e.assetName) return false;
@@ -445,6 +459,13 @@
                     
                     return eName === symbol;
                 });
+                
+                if (extMarket) {
+                    matchCount++;
+                    if (matchCount <= 5) {
+                        console.log('Found Extended match:', extMarket.name, 'for Paradex:', symbol);
+                    }
+                }
                 
                 if (extMarket && extMarket.marketStats && extMarket.marketStats.lastPrice) {
                     var paradexPrice = parseFloat(pMarket.mark_price);
@@ -476,7 +497,8 @@
                 }
             });
             
-            console.log('Total matched markets:', combined.length);
+            console.log('Total matches found:', matchCount);
+            console.log('Total matched markets with prices:', combined.length);
             return combined;
         }
 
