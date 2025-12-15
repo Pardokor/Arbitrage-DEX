@@ -467,7 +467,7 @@
                     }
                 }
                 
-                if (extMarket && extMarket.marketStats && extMarket.marketStats.lastPrice) {
+                if (extMarket && extMarket.marketStats && extMarket.marketStats.bidPrice && extMarket.marketStats.askPrice) {
                     var paradexBid = parseFloat(pMarket.bid);
                     var paradexAsk = parseFloat(pMarket.ask);
                     var paradexMid = (paradexBid + paradexAsk) / 2;
